@@ -1,9 +1,13 @@
-import streamlit as st
+from core.proposal_generator import generate_proposal
 
-st.set_page_config(
-    page_title="Mini SaaS - Propostas",
-    layout="centered"
-)
+data = {
+    "cliente_nome": "Cliente Exemplo",
+    "cliente_tipo": "PJ",
+    "servico": "Análise Exploratória de Dados",
+    "descricao": "Análise inicial dos dados para identificação de padrões.",
+    "prazo": "15 dias",
+    "valor": "3.500,00"
+}
 
-st.title("Mini SaaS de Propostas")
-st.write("Sprint Zero — ambiente funcionando.")
+path = generate_proposal(data)
+print(f"Proposta gerada em: {path}")
