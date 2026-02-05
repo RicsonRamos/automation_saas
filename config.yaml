@@ -1,0 +1,12 @@
+project:
+  root: "."   # raiz relativa
+
+paths:
+  app_dir: "app"
+  core_dir: "core"
+  data_dir: "data"
+  output_dir: "output"
+  templates_dir: "templates"
+
+files:
+  example_template: "templates/proposta.docx"
