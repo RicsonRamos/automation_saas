@@ -144,6 +144,18 @@ def exibir_botoes_download():
 # Tela de Formulário de Proposta
 # ------------------------------
 def form_proposta():
+    # Inicialize todas as chaves necessárias no session_state, se não existirem
+    if "servico" not in st.session_state:
+        st.session_state.servico = ""
+    if "descricao" not in st.session_state:
+        st.session_state.descricao = ""
+    if "prazo" not in st.session_state:
+        st.session_state.prazo = ""
+    if "valor" not in st.session_state:
+        st.session_state.valor = ""
+    if "versao" not in st.session_state:
+        st.session_state.versao = "v1.0"  # Valor inicial para versão, se não houver
+
     cliente_id = st.session_state.cliente_id
     if not cliente_id:
         st.warning("Selecione um cliente primeiro.")
@@ -155,7 +167,7 @@ def form_proposta():
 
     st.header(f"Gerar Proposta para {cliente_nome}")
 
-    # Se a proposta for duplicada, preenche os dados da proposta anterior
+    # Preencher os campos com os valores do session_state
     servico = st.text_input("Serviço", value=st.session_state.servico)
     descricao = st.text_area("Descrição", value=st.session_state.descricao)
     prazo = st.text_input("Prazo de entrega", value=st.session_state.prazo)
@@ -165,50 +177,57 @@ def form_proposta():
         submitted = st.form_submit_button("Gerar Proposta")
 
     if submitted:
-    if not cliente_nome.strip() or not servico.strip() or not valor.strip():
-        st.warning("Todos os campos são obrigatórios!")
-    else:
-        with st.spinner("Gerando proposta..."):
-            try:
-                ensure_dirs(OUTPUT_DIR)
-                data_atual = datetime.now().strftime("%d%m%Y_%H%M%S")
-                versao = st.session_state.versao
+        # Verifique se os campos obrigatórios estão preenchidos
+        if not cliente_nome.strip() or not servico.strip() or not descricao.strip() or not prazo.strip() or not valor.strip():
+            st.warning("Todos os campos são obrigatórios!")
+        else:
+            with st.spinner("Gerando proposta..."):
+                try:
+                    ensure_dirs(OUTPUT_DIR)
+                    data_atual = datetime.now().strftime("%d%m%Y_%H%M%S")
+                    versao = st.session_state.versao
 
-                # Gerar o arquivo da proposta
-                path = generate_proposal(
-                    client_id=cliente_id,
-                    data={
-                        "CLIENTE": cliente_nome,
-                        "DATA": datetime.now().strftime("%d/%m/%Y"),
-                        "VERSAO": versao,
-                        "SERVICO": servico,
-                        "DESCRICAO": descricao,
-                        "PRAZO": prazo,
-                        "VALOR": valor
-                    },
-                    template_path=EXAMPLE_TEMPLATE,
-                    output_dir=OUTPUT_DIR
-                )
+                    # Gerar o arquivo da proposta
+                    path = generate_proposal(
+                        client_id=cliente_id,
+                        data={
+                            "CLIENTE": cliente_nome,
+                            "DATA": datetime.now().strftime("%d/%m/%Y"),
+                            "VERSAO": versao,
+                            "SERVICO": servico,
+                            "DESCRICAO": descricao,
+                            "PRAZO": prazo,
+                            "VALOR": valor
+                        },
+                        template_path=EXAMPLE_TEMPLATE,
+                        output_dir=OUTPUT_DIR
+                    )
 
-                # Inserir dados no banco
-                conn = get_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO propostas (cliente_id, servico, descricao, prazo, valor, file_path, version)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (cliente_id, servico, descricao, prazo, valor, str(path), versao))
+                    # Inserir dados no banco
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(""" 
+                        INSERT INTO propostas (cliente_id, servico, descricao, prazo, valor, file_path, version)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """, (cliente_id, servico, descricao, prazo, valor, str(path), versao))
 
-                conn.commit()
-                conn.close()
+                    conn.commit()
+                    conn.close()
 
-                st.success(f"Proposta gerada com sucesso! 📄 \nArquivo salvo em: `{path}`", icon="✅")
-            except Exception as e:
-                st.error(f"Ocorreu um erro ao gerar a proposta: {e}", icon="🚨")
-            # Exibe os botões de download para as propostas deste cliente
-            exibir_botoes_download()
+                    st.success(f"Proposta gerada com sucesso! 📄 \nArquivo salvo em: `{path}`", icon="✅")
+                    
+                    # Atualize o session_state com os valores inseridos no formulário
+                    st.session_state.servico = servico
+                    st.session_state.descricao = descricao
+                    st.session_state.prazo = prazo
+                    st.session_state.valor = valor
+                except Exception as e:
+                    st.error(f"Ocorreu um erro ao gerar a proposta: {e}", icon="🚨")
 
+    # Adicionando o botão de voltar ao menu
     if st.button("Voltar ao Menu"):
         st.session_state.tela = "menu"
+
 
 
 # ------------------------------
