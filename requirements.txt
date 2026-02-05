@@ -1,0 +1,3 @@
+streamlit>=1.30
+docxtpl>=0.16
+jinja2>=3.1
