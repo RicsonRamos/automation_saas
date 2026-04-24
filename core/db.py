@@ -65,11 +65,25 @@ def initialize_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS financeiro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            proposta_id INTEGER,
+            proposta_id INTEGER UNIQUE, -- Garante pagamento único por proposta
             valor REAL,
             data_vencimento DATE,
             data_pagamento DATE,
-            status TEXT DEFAULT 'Pendente', -- Pendente, Pago
+            status TEXT DEFAULT 'Pendente',
+            FOREIGN KEY (proposta_id) REFERENCES propostas(id)
+        );
+    """)
+
+    # -------------------------
+    # Tabela de Histórico de Status
+    # -------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS historico_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER,
+            status_anterior TEXT,
+            status_novo TEXT,
+            data_alteracao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (proposta_id) REFERENCES propostas(id)
         );
     """)

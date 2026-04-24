@@ -1,11 +1,14 @@
 import streamlit as st
 import pandas as pd
+import sqlite3
 from datetime import datetime
 from pathlib import Path
+from pydantic import ValidationError
 
 from core.config_loader import EXAMPLE_TEMPLATE, OUTPUT_DIR, ensure_dirs
 from core.proposal_generator import generate_proposal
 from core.db import initialize_db, get_connection
+from core.schemas import ClienteSchema, PropostaSchema
 
 # ------------------------------
 # Inicialização
@@ -21,7 +24,7 @@ if "cliente_id" not in st.session_state:
 # ------------------------------
 # Configuração da página
 # ------------------------------
-st.set_page_config(page_title="Gestão SaaS - Automação", layout="wide", page_icon="🚀")
+st.set_page_config(page_title="Gestão SaaS - Automação", layout="wide")
 
 # CSS customizado para melhorar a estética
 st.markdown("""
@@ -36,12 +39,12 @@ st.markdown("""
 # Sidebar - Navegação
 # ------------------------------
 with st.sidebar:
-    st.title("🚀 Menu Principal")
+    st.title("Menu Principal")
     st.markdown("---")
-    if st.button("📊 Dashboard"): st.session_state.tela = "Dashboard"
-    if st.button("👥 Clientes"): st.session_state.tela = "Clientes"
-    if st.button("📑 Propostas & Contratos"): st.session_state.tela = "Projetos"
-    if st.button("💰 Financeiro"): st.session_state.tela = "Financeiro"
+    if st.button("Dashboard"): st.session_state.tela = "Dashboard"
+    if st.button("Clientes"): st.session_state.tela = "Clientes"
+    if st.button("Propostas e Contratos"): st.session_state.tela = "Projetos"
+    if st.button("Financeiro"): st.session_state.tela = "Financeiro"
     st.markdown("---")
     st.caption("Versão 1.0 - Sprint Zero Expanded")
 
@@ -51,11 +54,8 @@ with st.sidebar:
 def get_metrics():
     conn = get_connection()
     try:
-        # Receita Gerada (Soma de tudo que foi pago no financeiro)
         gerada = pd.read_sql("SELECT SUM(valor) as total FROM financeiro WHERE status = 'Pago'", conn)["total"].iloc[0] or 0
-        # Receita Esperada (Soma de tudo que está pendente no financeiro)
         esperada = pd.read_sql("SELECT SUM(valor) as total FROM financeiro WHERE status = 'Pendente'", conn)["total"].iloc[0] or 0
-        # Projetos Ativos (Status = 'Contrato')
         ativos = pd.read_sql("SELECT COUNT(*) as total FROM propostas WHERE status = 'Contrato'", conn)["total"].iloc[0] or 0
     except:
         gerada, esperada, ativos = 0, 0, 0
@@ -66,7 +66,7 @@ def get_metrics():
 # TELA: Dashboard
 # ------------------------------
 def tela_dashboard():
-    st.title("📊 Dashboard de Performance")
+    st.title("Dashboard de Performance")
     gerada, esperada, ativos = get_metrics()
 
     col1, col2, col3, col4 = st.columns(4)
@@ -80,7 +80,7 @@ def tela_dashboard():
     col_left, col_right = st.columns(2)
     
     with col_left:
-        st.subheader("📈 Volume de Vendas")
+        st.subheader("Volume de Vendas")
         conn = get_connection()
         try:
             df_vendas = pd.read_sql("SELECT date_created, valor FROM propostas", conn)
@@ -95,7 +95,7 @@ def tela_dashboard():
         conn.close()
 
     with col_right:
-        st.subheader("🔔 Próximos Vencimentos")
+        st.subheader("Próximos Vencimentos")
         conn = get_connection()
         try:
             df_venc = pd.read_sql("""
@@ -117,7 +117,7 @@ def tela_dashboard():
 # TELA: Clientes
 # ------------------------------
 def tela_clientes():
-    st.title("👥 Gestão de Clientes")
+    st.title("Gestão de Clientes")
     
     tabs = st.tabs(["Listar Clientes", "Cadastrar Novo"])
     
@@ -129,16 +129,21 @@ def tela_clientes():
             email = st.text_input("E-mail")
             tel = st.text_input("Telefone")
             if st.form_submit_button("Salvar"):
-                if nome:
+                try:
+                    # Validação Pydantic
+                    dados_validados = ClienteSchema(nome=nome, tipo=tipo, cpf_cnpj=doc, email=email or None, telefone=tel)
+                    
                     conn = get_connection()
                     cursor = conn.cursor()
                     cursor.execute("INSERT INTO clientes (nome, tipo, cpf_cnpj, email, telefone) VALUES (?,?,?,?,?)", 
-                                 (nome, tipo, doc, email, tel))
+                                 (dados_validados.nome, dados_validados.tipo, dados_validados.cpf_cnpj, dados_validados.email, dados_validados.telefone))
                     conn.commit()
                     conn.close()
-                    st.success("Cliente cadastrado!")
-                else:
-                    st.error("Nome é obrigatório.")
+                    st.success("Cliente cadastrado com sucesso!")
+                except ValidationError as e:
+                    st.error(f"Erro de validação: {e}")
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
 
     with tabs[0]:
         conn = get_connection()
@@ -150,13 +155,13 @@ def tela_clientes():
 # TELA: Projetos / Propostas
 # ------------------------------
 def tela_projetos():
-    st.title("📑 Propostas e Contratos")
+    st.title("Propostas e Contratos")
     
     conn = get_connection()
     clientes = pd.read_sql("SELECT id, nome FROM clientes", conn)
     conn.close()
     
-    with st.expander("➕ Gerar Nova Proposta"):
+    with st.expander("Gerar Nova Proposta"):
         if clientes.empty:
             st.warning("Cadastre um cliente primeiro.")
         else:
@@ -169,16 +174,27 @@ def tela_projetos():
             vencimento = st.date_input("Data de Vencimento da Proposta")
             
             if st.button("Gerar e Salvar"):
-                data_doc = {
-                    "CLIENTE": c_nome,
-                    "DATA": datetime.now().strftime("%d/%m/%Y"),
-                    "SERVICO": servico,
-                    "DESCRICAO": desc,
-                    "VALOR": f"R$ {valor:,.2f}",
-                    "PRAZO": prazo
-                }
-                c_id = cliente_map[c_nome]
                 try:
+                    # Validação Pydantic
+                    c_id = cliente_map[c_nome]
+                    prop_validada = PropostaSchema(
+                        cliente_id=c_id, 
+                        servico=servico, 
+                        descricao=desc, 
+                        valor=valor, 
+                        prazo=prazo, 
+                        data_vencimento=vencimento
+                    )
+                    
+                    data_doc = {
+                        "CLIENTE": c_nome,
+                        "DATA": datetime.now().strftime("%d/%m/%Y"),
+                        "SERVICO": prop_validada.servico,
+                        "DESCRICAO": prop_validada.descricao,
+                        "VALOR": f"R$ {prop_validada.valor:,.2f}",
+                        "PRAZO": prop_validada.prazo
+                    }
+                    
                     path = generate_proposal(c_id, data_doc, EXAMPLE_TEMPLATE, OUTPUT_DIR)
                     
                     conn = get_connection()
@@ -186,14 +202,16 @@ def tela_projetos():
                     cursor.execute("""
                         INSERT INTO propostas (cliente_id, servico, descricao, prazo, valor, file_path, status, data_vencimento)
                         VALUES (?, ?, ?, ?, ?, ?, 'Orçamento', ?)
-                    """, (c_id, servico, desc, prazo, valor, str(path), vencimento))
+                    """, (c_id, prop_validada.servico, prop_validada.descricao, prop_validada.prazo, prop_validada.valor, str(path), prop_validada.data_vencimento))
                     conn.commit()
                     conn.close()
                     st.success(f"Proposta salva! Arquivo: {path}")
+                except ValidationError as e:
+                    st.error(f"Erro de validação: {e}")
                 except Exception as e:
                     st.error(f"Erro ao gerar proposta: {e}")
 
-    st.markdown("### 📋 Lista de Documentos")
+    st.markdown("### Lista de Documentos")
     conn = get_connection()
     query = """
         SELECT p.id, c.nome as Cliente, p.servico, p.valor, p.status, p.data_vencimento, p.nf_emitida, p.file_path
@@ -206,20 +224,40 @@ def tela_projetos():
         with st.expander(f"{row['Cliente']} - {row['servico']} ({row['status']})"):
             col1, col2, col3 = st.columns([2, 1, 1])
             col1.write(f"**Valor:** R$ {row['valor']:,.2f} | **Vencimento:** {row['data_vencimento']}")
-            col2.write(f"**NF:** {'✅ Emitida' if row['nf_emitida'] else '❌ Pendente'}")
+            col2.write(f"**NF:** {'Emitida' if row['nf_emitida'] else 'Pendente'}")
             
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 if row['status'] == 'Orçamento':
                     if st.button("Aprovar (Contrato)", key=f"apr_{row['id']}"):
-                        conn = get_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE propostas SET status = 'Contrato' WHERE id = ?", (row['id'],))
-                        cursor.execute("INSERT INTO financeiro (proposta_id, valor, data_vencimento, status) VALUES (?,?,?, 'Pendente')",
-                                     (row['id'], row['valor'], row['data_vencimento']))
-                        conn.commit()
-                        conn.close()
-                        st.rerun()
+                        try:
+                            conn = get_connection()
+                            cursor = conn.cursor()
+                            
+                            # Transação para garantir integridade
+                            cursor.execute("BEGIN TRANSACTION")
+                            
+                            # Log de Status
+                            cursor.execute("""
+                                INSERT INTO historico_status (proposta_id, status_anterior, status_novo)
+                                VALUES (?, 'Orçamento', 'Contrato')
+                            """, (row['id'],))
+                            
+                            # Update Status
+                            cursor.execute("UPDATE propostas SET status = 'Contrato' WHERE id = ?", (row['id'],))
+                            
+                            # Financeiro (UNIQUE proposta_id garante pagamento único)
+                            cursor.execute("INSERT INTO financeiro (proposta_id, valor, data_vencimento, status) VALUES (?,?,?, 'Pendente')",
+                                         (row['id'], row['valor'], row['data_vencimento']))
+                            
+                            conn.commit()
+                            conn.close()
+                            st.rerun()
+                        except sqlite3.IntegrityError:
+                            st.warning("Este contrato já possui um registro financeiro ativo.")
+                        except Exception as e:
+                            st.error(f"Erro ao aprovar contrato: {e}")
+
             with c2:
                 if row['status'] == 'Contrato':
                     if st.button("Concluir", key=f"concl_{row['id']}"):
@@ -248,7 +286,7 @@ def tela_projetos():
 # TELA: Financeiro
 # ------------------------------
 def tela_financeiro():
-    st.title("💰 Controle Financeiro")
+    st.title("Controle Financeiro")
     
     conn = get_connection()
     try:
@@ -268,7 +306,7 @@ def tela_financeiro():
     else:
         st.dataframe(df_f, use_container_width=True)
         
-        st.markdown("### 🛠️ Ações Financeiras")
+        st.markdown("### Ações Financeiras")
         for i, row in df_f.iterrows():
             if row['status'] == 'Pendente':
                 if st.button(f"Confirmar Pagamento: {row['Cliente']} - R$ {row['valor']}", key=f"pag_{row['id']}"):
