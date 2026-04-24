@@ -10,7 +10,7 @@ def get_connection():
     return conn
 
 def initialize_db():
-    """Inicializa o banco de dados com as tabelas necessárias."""
+    """Inicializa o banco de dados com as tabelas necessárias e realiza migrações simples."""
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -29,7 +29,7 @@ def initialize_db():
     """)
 
     # -------------------------
-    # Tabela de propostas
+    # Tabela de propostas / projetos
     # -------------------------
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS propostas (
@@ -41,8 +41,36 @@ def initialize_db():
             prazo TEXT,
             valor REAL,
             file_path TEXT,
-            version INTEGER,
-            FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+            version INTEGER
+        );
+    """)
+
+    # Migração simples: Adiciona colunas se não existirem
+    columns_to_add = [
+        ("status", "TEXT DEFAULT 'Orçamento'"),
+        ("data_vencimento", "DATE"),
+        ("nf_emitida", "BOOLEAN DEFAULT 0")
+    ]
+    
+    cursor.execute("PRAGMA table_info(propostas)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    for col_name, col_type in columns_to_add:
+        if col_name not in existing_columns:
+            cursor.execute(f"ALTER TABLE propostas ADD COLUMN {col_name} {col_type}")
+
+    # -------------------------
+    # Tabela de financeiro (Pagamentos)
+    # -------------------------
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS financeiro (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            proposta_id INTEGER,
+            valor REAL,
+            data_vencimento DATE,
+            data_pagamento DATE,
+            status TEXT DEFAULT 'Pendente', -- Pendente, Pago
+            FOREIGN KEY (proposta_id) REFERENCES propostas(id)
         );
     """)
 

@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
@@ -7,354 +8,283 @@ from core.proposal_generator import generate_proposal
 from core.db import initialize_db, get_connection
 
 # ------------------------------
-# Inicialização do DB e sessão
+# Inicialização
 # ------------------------------
 initialize_db()
+ensure_dirs(OUTPUT_DIR)
+
 if "tela" not in st.session_state:
-    st.session_state.tela = "menu"
+    st.session_state.tela = "Dashboard"
 if "cliente_id" not in st.session_state:
     st.session_state.cliente_id = None
 
 # ------------------------------
 # Configuração da página
 # ------------------------------
-st.set_page_config(page_title="Mini SaaS - Propostas", layout="centered")
-st.title("Mini SaaS de Propostas 📄")
+st.set_page_config(page_title="Gestão SaaS - Automação", layout="wide", page_icon="🚀")
+
+# CSS customizado para melhorar a estética
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stMetric { background-color: #ffffff; padding: 20px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .stButton>button { width: 100%; border-radius: 5px; }
+    </style>
+""", unsafe_allow_html=True)
 
 # ------------------------------
-# Função de Menu Inicial
+# Sidebar - Navegação
 # ------------------------------
-def menu_inicial():
-    st.header("Menu Principal")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("Criar Cliente"):
-            st.session_state.tela = "criar_cliente"
-    with col2:
-        if st.button("Clientes"):
-            st.session_state.tela = "selecionar_cliente"
-    with col3:
-        if st.button("Histórico de Propostas"):
-            st.session_state.tela = "historico"
+with st.sidebar:
+    st.title("🚀 Menu Principal")
+    st.markdown("---")
+    if st.button("📊 Dashboard"): st.session_state.tela = "Dashboard"
+    if st.button("👥 Clientes"): st.session_state.tela = "Clientes"
+    if st.button("📑 Propostas & Contratos"): st.session_state.tela = "Projetos"
+    if st.button("💰 Financeiro"): st.session_state.tela = "Financeiro"
+    st.markdown("---")
+    st.caption("Versão 1.0 - Sprint Zero Expanded")
 
 # ------------------------------
-# Tela de Criação de Cliente
+# Funções Auxiliares de DB
 # ------------------------------
-def criar_cliente():
-    st.header("Criar Novo Cliente")
-    nome = st.text_input("Nome do Cliente")
-    tipo = st.selectbox("Tipo de Cliente", ["PF", "PJ"])
-    cpf_cnpj = st.text_input("CPF/CNPJ")
-    email = st.text_input("Email")
-    telefone = st.text_input("Telefone")
-
-    if st.button("Salvar Cliente"):
-        if not nome.strip():
-            st.warning("Digite o nome do cliente!")
-        else:
-            conn = get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO clientes (nome, tipo, cpf_cnpj, email, telefone)
-                VALUES (?, ?, ?, ?, ?)
-            """, (nome, tipo, cpf_cnpj, email, telefone))
-            conn.commit()
-            conn.close()
-            st.success(f"Cliente '{nome}' criado com sucesso!")
-            st.session_state.tela = "menu"
-
-    if st.button("Voltar ao Menu"):
-        st.session_state.tela = "menu"
+def get_metrics():
+    conn = get_connection()
+    try:
+        # Receita Gerada (Soma de tudo que foi pago no financeiro)
+        gerada = pd.read_sql("SELECT SUM(valor) as total FROM financeiro WHERE status = 'Pago'", conn)["total"].iloc[0] or 0
+        # Receita Esperada (Soma de tudo que está pendente no financeiro)
+        esperada = pd.read_sql("SELECT SUM(valor) as total FROM financeiro WHERE status = 'Pendente'", conn)["total"].iloc[0] or 0
+        # Projetos Ativos (Status = 'Contrato')
+        ativos = pd.read_sql("SELECT COUNT(*) as total FROM propostas WHERE status = 'Contrato'", conn)["total"].iloc[0] or 0
+    except:
+        gerada, esperada, ativos = 0, 0, 0
+    conn.close()
+    return gerada, esperada, ativos
 
 # ------------------------------
-# Tela de Seleção de Cliente
+# TELA: Dashboard
 # ------------------------------
-def selecionar_cliente():
-    st.header("Selecionar Cliente")
+def tela_dashboard():
+    st.title("📊 Dashboard de Performance")
+    gerada, esperada, ativos = get_metrics()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Receita Gerada", f"R$ {gerada:,.2f}")
+    col2.metric("Receita Esperada", f"R$ {esperada:,.2f}")
+    col3.metric("Contratos Ativos", ativos)
+    col4.metric("Total em Negociação", f"R$ {gerada + esperada:,.2f}")
+
+    st.markdown("---")
     
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, nome FROM clientes")
-    clientes = cursor.fetchall()
-    conn.close()
-
-    cliente_options = {c[1]: c[0] for c in clientes}
-    cliente_selecionado = st.selectbox("Escolha o Cliente", [""] + list(cliente_options.keys()))
-
-    if cliente_selecionado:
-        cliente_id = cliente_options[cliente_selecionado]
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("📈 Volume de Vendas")
         conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT nome, tipo, cpf_cnpj, email, telefone FROM clientes WHERE id = ?", (cliente_id,))
-        cliente_info = cursor.fetchone()
-        conn.close()
-        
-        st.subheader("Informações do Cliente")
-        st.write(f"**Nome:** {cliente_info[0]}")
-        st.write(f"**Tipo:** {cliente_info[1]}")
-        st.write(f"**CPF/CNPJ:** {cliente_info[2]}")
-        st.write(f"**Email:** {cliente_info[3]}")
-        st.write(f"**Telefone:** {cliente_info[4]}")
-        
-        if st.button("Criar Proposta"):
-            st.session_state.cliente_id = cliente_id
-            st.session_state.cliente_nome = cliente_info[0]
-            st.session_state.cliente_tipo = cliente_info[1]
-            st.session_state.tela = "form_proposta"
-
-    if st.button("Voltar ao Menu"):
-        st.session_state.tela = "menu"
-
-# ------------------------------
-# Função para exibir os botões de download
-# ------------------------------
-# Exemplo na função `exibir_botoes_download()`
-
-def exibir_botoes_download():
-    # Recupera as propostas do banco de dados
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT p.id, p.file_path 
-        FROM propostas p
-        WHERE p.cliente_id = ?
-    """, (st.session_state.cliente_id,))
-    propostas = cursor.fetchall()
-    conn.close()
-
-    if propostas:
-        for i, p in enumerate(propostas):
-            file_path = Path(p[1])  # Caminho do arquivo
-            if file_path.exists():
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        label=f" Baixar Proposta {i + 1}",
-                        data=f,
-                        file_name=file_path.name,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"proposta_{p[0]}"  # Chave única baseada no ID da proposta
-                    )
+        try:
+            df_vendas = pd.read_sql("SELECT date_created, valor FROM propostas", conn)
+            if not df_vendas.empty:
+                df_vendas['date_created'] = pd.to_datetime(df_vendas['date_created'])
+                df_grouped = df_vendas.set_index('date_created').resample('D').sum().reset_index()
+                st.area_chart(df_grouped.set_index('date_created'))
             else:
-                st.warning(f"Arquivo da Proposta {i + 1} não encontrado.")
-    else:
-        st.info("Nenhuma proposta disponível para este cliente.")
+                st.info("Sem dados de vendas para exibir no gráfico.")
+        except:
+            st.error("Erro ao carregar dados do gráfico.")
+        conn.close()
 
+    with col_right:
+        st.subheader("🔔 Próximos Vencimentos")
+        conn = get_connection()
+        try:
+            df_venc = pd.read_sql("""
+                SELECT p.servico, f.valor, f.data_vencimento 
+                FROM financeiro f 
+                JOIN propostas p ON f.proposta_id = p.id 
+                WHERE f.status = 'Pendente' 
+                ORDER BY f.data_vencimento ASC LIMIT 5
+            """, conn)
+            if not df_venc.empty:
+                st.table(df_venc)
+            else:
+                st.success("Nenhum pagamento pendente para os próximos dias!")
+        except:
+            st.info("Aguardando dados financeiros.")
+        conn.close()
 
 # ------------------------------
-# Tela de Formulário de Proposta
+# TELA: Clientes
 # ------------------------------
-def form_proposta():
-    # Inicialize todas as chaves necessárias no session_state, se não existirem
-    if "servico" not in st.session_state:
-        st.session_state.servico = ""
-    if "descricao" not in st.session_state:
-        st.session_state.descricao = ""
-    if "prazo" not in st.session_state:
-        st.session_state.prazo = ""
-    if "valor" not in st.session_state:
-        st.session_state.valor = ""
-    if "versao" not in st.session_state:
-        st.session_state.versao = "v1.0"  # Valor inicial para versão, se não houver
-
-    cliente_id = st.session_state.cliente_id
-    if not cliente_id:
-        st.warning("Selecione um cliente primeiro.")
-        st.session_state.tela = "selecionar_cliente"
-        return
-
-    cliente_nome = st.session_state.cliente_nome
-    cliente_tipo = st.session_state.cliente_tipo
-
-    st.header(f"Gerar Proposta para {cliente_nome}")
-
-    # Preencher os campos com os valores do session_state
-    servico = st.text_input("Serviço", value=st.session_state.servico)
-    descricao = st.text_area("Descrição", value=st.session_state.descricao)
-    prazo = st.text_input("Prazo de entrega", value=st.session_state.prazo)
-    valor = st.text_input("Valor (R$)", value=st.session_state.valor)
-
-    with st.form("proposta_form"):
-        submitted = st.form_submit_button("Gerar Proposta")
-
-    if submitted:
-        # Verifique se os campos obrigatórios estão preenchidos
-        if not cliente_nome.strip() or not servico.strip() or not descricao.strip() or not prazo.strip() or not valor.strip():
-            st.warning("Todos os campos são obrigatórios!")
-        else:
-            with st.spinner("Gerando proposta..."):
-                try:
-                    ensure_dirs(OUTPUT_DIR)
-                    data_atual = datetime.now().strftime("%d%m%Y_%H%M%S")
-                    versao = st.session_state.versao
-
-                    # Gerar o arquivo da proposta
-                    path = generate_proposal(
-                        client_id=cliente_id,
-                        data={
-                            "CLIENTE": cliente_nome,
-                            "DATA": datetime.now().strftime("%d/%m/%Y"),
-                            "VERSAO": versao,
-                            "SERVICO": servico,
-                            "DESCRICAO": descricao,
-                            "PRAZO": prazo,
-                            "VALOR": valor
-                        },
-                        template_path=EXAMPLE_TEMPLATE,
-                        output_dir=OUTPUT_DIR
-                    )
-
-                    # Inserir dados no banco
+def tela_clientes():
+    st.title("👥 Gestão de Clientes")
+    
+    tabs = st.tabs(["Listar Clientes", "Cadastrar Novo"])
+    
+    with tabs[1]:
+        with st.form("novo_cliente"):
+            nome = st.text_input("Nome/Razão Social")
+            tipo = st.selectbox("Tipo", ["PJ", "PF"])
+            doc = st.text_input("CPF/CNPJ")
+            email = st.text_input("E-mail")
+            tel = st.text_input("Telefone")
+            if st.form_submit_button("Salvar"):
+                if nome:
                     conn = get_connection()
                     cursor = conn.cursor()
-                    cursor.execute(""" 
-                        INSERT INTO propostas (cliente_id, servico, descricao, prazo, valor, file_path, version)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """, (cliente_id, servico, descricao, prazo, valor, str(path), versao))
-
+                    cursor.execute("INSERT INTO clientes (nome, tipo, cpf_cnpj, email, telefone) VALUES (?,?,?,?,?)", 
+                                 (nome, tipo, doc, email, tel))
                     conn.commit()
                     conn.close()
+                    st.success("Cliente cadastrado!")
+                else:
+                    st.error("Nome é obrigatório.")
 
-                    st.success(f"Proposta gerada com sucesso! 📄 \nArquivo salvo em: `{path}`", icon="✅")
-                    
-                    # Atualize o session_state com os valores inseridos no formulário
-                    st.session_state.servico = servico
-                    st.session_state.descricao = descricao
-                    st.session_state.prazo = prazo
-                    st.session_state.valor = valor
-                except Exception as e:
-                    st.error(f"Ocorreu um erro ao gerar a proposta: {e}", icon="🚨")
-
-    # Adicionando o botão de voltar ao menu
-    if st.button("Voltar ao Menu"):
-        st.session_state.tela = "menu"
-
-
+    with tabs[0]:
+        conn = get_connection()
+        df_clientes = pd.read_sql("SELECT * FROM clientes", conn)
+        conn.close()
+        st.dataframe(df_clientes, use_container_width=True)
 
 # ------------------------------
-# Tela de Histórico de Propostas
+# TELA: Projetos / Propostas
 # ------------------------------
-def historico_propostas():
-    st.header("Histórico de Propostas")
-
+def tela_projetos():
+    st.title("📑 Propostas e Contratos")
+    
     conn = get_connection()
-    cursor = conn.cursor()
-
-    # Busca os clientes
-    cursor.execute("SELECT id, nome FROM clientes")
-    clientes = cursor.fetchall()
-    cliente_options = {c[1]: c[0] for c in clientes}
-
-    cliente_selected = st.selectbox("Filtrar por Cliente", ["Todos"] + list(cliente_options.keys()))
-    servico_filtro = st.text_input("Pesquisar por Serviço")
-    data_filtro = st.text_input("Pesquisar por Data (dd/mm/yyyy)")
-
-    # Query para buscar propostas
-    query = """
-        SELECT p.id, c.nome, p.servico, p.descricao, p.prazo, p.valor, p.version, p.file_path, p.date_created
-        FROM propostas p
-        JOIN clientes c ON p.cliente_id = c.id
-        WHERE 1=1
-    """
-    params = []
-
-    if cliente_selected != "Todos":
-        query += " AND c.id = ?"
-        params.append(cliente_options[cliente_selected])
-
-    if servico_filtro.strip():
-        query += " AND p.servico LIKE ?"
-        params.append(f"%{servico_filtro.strip()}%")
-
-    if data_filtro.strip():
-        query += " AND DATE(p.date_created) = DATE(?)"
-        params.append(data_filtro.strip())
-
-    # Executa a query
-    cursor.execute(query, params)
-    propostas = cursor.fetchall()
+    clientes = pd.read_sql("SELECT id, nome FROM clientes", conn)
     conn.close()
-
-    if propostas:
-        for p in propostas:
-            st.markdown("---")
-            st.subheader(f"{p[1]} | Serviço: {p[2] or 'Não especificado'} | Data: {p[8]} | v{p[6]}")
-            descricao = p[3] if p[3] else 'Não especificada'
-            prazo = p[4] if p[4] else 'Não especificado'
-            valor = f"R$ {p[5]:.2f}" if p[5] else 'Não especificado'
+    
+    with st.expander("➕ Gerar Nova Proposta"):
+        if clientes.empty:
+            st.warning("Cadastre um cliente primeiro.")
+        else:
+            cliente_map = dict(zip(clientes['nome'], clientes['id']))
+            c_nome = st.selectbox("Selecione o Cliente", clientes['nome'])
+            servico = st.text_input("Serviço")
+            desc = st.text_area("Descrição do Escopo")
+            valor = st.number_input("Valor Total (R$)", min_value=0.0)
+            prazo = st.text_input("Prazo (ex: 15 dias)")
+            vencimento = st.date_input("Data de Vencimento da Proposta")
             
-            st.write(f"**Descrição:** {descricao}")
-            st.write(f"**Prazo:** {prazo}")
-            st.write(f"**Valor:** {valor}")
+            if st.button("Gerar e Salvar"):
+                data_doc = {
+                    "CLIENTE": c_nome,
+                    "DATA": datetime.now().strftime("%d/%m/%Y"),
+                    "SERVICO": servico,
+                    "DESCRICAO": desc,
+                    "VALOR": f"R$ {valor:,.2f}",
+                    "PRAZO": prazo
+                }
+                c_id = cliente_map[c_nome]
+                try:
+                    path = generate_proposal(c_id, data_doc, EXAMPLE_TEMPLATE, OUTPUT_DIR)
+                    
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO propostas (cliente_id, servico, descricao, prazo, valor, file_path, status, data_vencimento)
+                        VALUES (?, ?, ?, ?, ?, ?, 'Orçamento', ?)
+                    """, (c_id, servico, desc, prazo, valor, str(path), vencimento))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Proposta salva! Arquivo: {path}")
+                except Exception as e:
+                    st.error(f"Erro ao gerar proposta: {e}")
 
-            file_path = Path(p[7])
-
-            # Botão de duplicação da proposta
-            if st.button(f"Duplicar Proposta {p[0]}", key=f"duplicar_{p[0]}"):
-                # Preencher o formulário com dados da proposta selecionada
-                st.session_state.cliente_id = p[1]
-                st.session_state.cliente_nome = p[1]
-                st.session_state.cliente_tipo = p[2]
-
-                # Preenche os campos com os dados da proposta
-                st.session_state.servico = p[2]
-                st.session_state.descricao = p[3]
-                st.session_state.prazo = p[4]
-                st.session_state.valor = p[5]
-                st.session_state.versao = f"v{int(p[6]) + 1}"  # Nova versão da proposta
-
-                st.session_state.tela = "form_proposta"
-                
-            # Botão de download
-            if file_path.exists():
-                with open(file_path, "rb") as f:
-                    st.download_button(
-                        label=f"⬇️ Baixar Proposta {p[0]}",
-                        data=f,
-                        file_name=file_path.name,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        key=f"download_{p[0]}"  # Chave única baseada no ID da proposta
-                    )
-
-            # Botão de exclusão
-            if st.button(f"Excluir Proposta {p[0]}", key=f"excluir_{p[0]}"):
-                if st.confirmation_dialog("Você tem certeza de que deseja excluir esta proposta?"):
-                    excluir_proposta(p[0], file_path)
-    else:
-        st.info("Nenhuma proposta encontrada para os filtros aplicados.")
-
-
-
-# ------------------------------
-# Função para Excluir Proposta do DB
-# ------------------------------
-def excluir_proposta(proposta_id, file_path):
+    st.markdown("### 📋 Lista de Documentos")
     conn = get_connection()
-    cursor = conn.cursor()
-
-    # Exclui a proposta do banco de dados
-    cursor.execute("DELETE FROM propostas WHERE id = ?", (proposta_id,))
-    conn.commit()
-
-    # Verifica se o arquivo da proposta existe e o remove
-    if file_path.exists():
-        file_path.unlink()  # Exclui o arquivo da proposta
-
+    query = """
+        SELECT p.id, c.nome as Cliente, p.servico, p.valor, p.status, p.data_vencimento, p.nf_emitida, p.file_path
+        FROM propostas p JOIN clientes c ON p.cliente_id = c.id
+    """
+    df_p = pd.read_sql(query, conn)
     conn.close()
-    st.success(f"Proposta {proposta_id} excluída com sucesso.")
-    st.experimental_rerun()  # Atualiza a tela após a exclusão
 
-
+    for i, row in df_p.iterrows():
+        with st.expander(f"{row['Cliente']} - {row['servico']} ({row['status']})"):
+            col1, col2, col3 = st.columns([2, 1, 1])
+            col1.write(f"**Valor:** R$ {row['valor']:,.2f} | **Vencimento:** {row['data_vencimento']}")
+            col2.write(f"**NF:** {'✅ Emitida' if row['nf_emitida'] else '❌ Pendente'}")
+            
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                if row['status'] == 'Orçamento':
+                    if st.button("Aprovar (Contrato)", key=f"apr_{row['id']}"):
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE propostas SET status = 'Contrato' WHERE id = ?", (row['id'],))
+                        cursor.execute("INSERT INTO financeiro (proposta_id, valor, data_vencimento, status) VALUES (?,?,?, 'Pendente')",
+                                     (row['id'], row['valor'], row['data_vencimento']))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+            with c2:
+                if row['status'] == 'Contrato':
+                    if st.button("Concluir", key=f"concl_{row['id']}"):
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE propostas SET status = 'Concluído' WHERE id = ?", (row['id'],))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+            with c3:
+                if not row['nf_emitida']:
+                    if st.button("Marcar NF Emitida", key=f"nf_{row['id']}"):
+                        conn = get_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE propostas SET nf_emitida = 1 WHERE id = ?", (row['id'],))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+            with c4:
+                file_path = Path(row['file_path'])
+                if file_path.exists():
+                    with open(file_path, "rb") as f:
+                        st.download_button("Download DOCX", f, file_name=file_path.name, key=f"dl_{row['id']}")
 
 # ------------------------------
-# Controle de Navegação
+# TELA: Financeiro
 # ------------------------------
-if st.session_state.tela == "menu":
-    menu_inicial()
-elif st.session_state.tela == "criar_cliente":
-    criar_cliente()
-elif st.session_state.tela == "selecionar_cliente":
-    selecionar_cliente()
-elif st.session_state.tela == "form_proposta":
-    form_proposta()
-elif st.session_state.tela == "historico":
-    historico_propostas()
+def tela_financeiro():
+    st.title("💰 Controle Financeiro")
+    
+    conn = get_connection()
+    try:
+        query = """
+            SELECT f.id, c.nome as Cliente, p.servico, f.valor, f.data_vencimento, f.status, f.data_pagamento
+            FROM financeiro f
+            JOIN propostas p ON f.proposta_id = p.id
+            JOIN clientes c ON p.cliente_id = c.id
+        """
+        df_f = pd.read_sql(query, conn)
+    except:
+        df_f = pd.DataFrame()
+    conn.close()
+
+    if df_f.empty:
+        st.info("Nenhum registro financeiro encontrado. Aprove uma proposta para gerar faturamento.")
+    else:
+        st.dataframe(df_f, use_container_width=True)
+        
+        st.markdown("### 🛠️ Ações Financeiras")
+        for i, row in df_f.iterrows():
+            if row['status'] == 'Pendente':
+                if st.button(f"Confirmar Pagamento: {row['Cliente']} - R$ {row['valor']}", key=f"pag_{row['id']}"):
+                    conn = get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE financeiro SET status = 'Pago', data_pagamento = ? WHERE id = ?", 
+                                 (datetime.now().strftime("%Y-%m-%d"), row['id']))
+                    conn.commit()
+                    conn.close()
+                    st.success("Pagamento confirmado!")
+                    st.rerun()
+
+# ------------------------------
+# Roteamento
+# ------------------------------
+if st.session_state.tela == "Dashboard": tela_dashboard()
+elif st.session_state.tela == "Clientes": tela_clientes()
+elif st.session_state.tela == "Projetos": tela_projetos()
+elif st.session_state.tela == "Financeiro": tela_financeiro()
